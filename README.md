@@ -60,6 +60,9 @@ description: <一句话说明做什么，以及**什么时候该用它**>
 （"当用户发来 xxx 链接、要求 yyy 时使用"），而不只是功能描述。
 
 新增之后不用重跑 `install.sh` —— 目录是 symlink，加进来就可见。
+但**要把它加进下面的「当前 skill」表**：`./install.sh --check` 会校验
+README 清单、`skills/` 下的实际目录、以及每个 `SKILL.md` 的 `name`/`description`
+三者是否一致，漏了会报出来。这个校验在每次 `install.sh` 结束时自动跑一遍。
 
 ## 当前 skill
 
