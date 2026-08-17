@@ -1,0 +1,9 @@
+{
+  "name": "xhs-reader",
+  "description": "读取小红书笔记的完整内容：图文逐页读图，视频做语音转写 + 关键帧读画面 + 带时间轴的完整 script。不登录账号。",
+  "version": "0.2.0",
+  "author": {
+    "name": "Viktor",
+    "url": "https://github.com/whicter"
+  }
+}
