@@ -49,17 +49,23 @@ git clone <this repo> ~/Documents/claude_skills
 
 ## 兼容性
 
-| 环境 | 能不能用 |
-|---|---|
-| **Claude Code**（CLI / 桌面 / IDE 插件） | ✅ 唯一支持的环境 |
-| Claude.ai 网页版 / 手机 App | ❌ 沙箱里没有浏览器工具，也访问不了 xiaohongshu.com |
-| **Codex、Cursor、其它 agent** | ❌ 见下 |
+| 环境 | 图文笔记 | 视频笔记 | 入口 |
+|---|---|---|---|
+| **Claude Code**（CLI / 桌面 / IDE） | ✅ | ✅ | `SKILL.md`，自动触发 |
+| **Codex / Cursor / 其它带 shell 的 agent** | ⚠️ 走 OCR | ✅ 语音<br>⚠️ 画面走 OCR | [`AGENTS.md`](AGENTS.md)（**未在真实 Codex 上实测**） |
+| Claude.ai 网页版 / 手机 App | ❌ | ❌ | 沙箱访问不了 xiaohongshu.com |
 
-`xhs-reader` 依赖 Claude Code 内建的 Browser 工具（`mcp__Claude_Browser__*`）——
-小红书正文是 JS 渲染后才存在于 `__INITIAL_STATE__` 里的，**必须有个真浏览器执行
-JS 才拿得到**，`curl` 和 WebFetch 都不行。别的 agent 要用，得先自己接一个
-Playwright/Puppeteer 类的 MCP，再把 SKILL.md 的第一、二步重写；`AGENTS.md`
-格式的差异反而是小事。**这是重做一半，不是移植。**
+取数这一层是**纯 `curl` + `python3`，任何有 shell 的 agent 都一样**——
+`__INITIAL_STATE__` 是服务端渲染在 HTML 里的，不需要浏览器执行 JS。
+
+> 本 README 2026-08-17 上午还写着"必须有真浏览器，别的 agent 要重做一半"。
+> 当天下午一条 `curl` 就推翻了它：875KB HTML 里数据齐全，抽出的图片 URL
+> 与浏览器路径逐条一致。**那个错误前提让这份 skill 白白独占了 Claude Code。**
+
+真正划分能力边界的不是取数，是**读图**：图文笔记的正文几乎全在图片里。
+能直接看图的 agent（Claude Code）逐页读；不能的（Codex 只接受用户上传的图，
+agent 不能自己打开磁盘上的图）走 `tesseract` OCR——实测**数字很准、中文偶有单字错、
+带 `≥` 的行可能整行漏掉**，细节和注意事项写在 `AGENTS.md`。
 
 操作系统方面无限制：macOS / Linux 都可以（2026-08-17 已移除原先唯一的 macOS
 专有依赖 `sips`）。Windows 需要 WSL 或自行替换 shell 命令。
@@ -68,10 +74,12 @@ Playwright/Puppeteer 类的 MCP，再把 SKILL.md 的第一、二步重写；`AG
 
 | 用途 | 需要 | 装法 |
 |---|---|---|
-| 读**图文**笔记 | `curl` | 系统自带 |
+| 抓取 + 解析（一切的前提） | `curl`、`python3` | 系统自带 |
 | 读**视频**笔记 | `ffmpeg`、`ffprobe`、`whisper-cli` | macOS：`brew install ffmpeg whisper-cpp`；Debian/Ubuntu：`apt install ffmpeg` + 自行编译 [whisper.cpp](https://github.com/ggerganov/whisper.cpp)（注意其二进制可能叫 `main` 或 `whisper-cli`，按需改命令） |
+| **OCR**（只有不能直接看图的 agent 需要） | `tesseract` + 中文包 | macOS：`brew install tesseract tesseract-lang`；Debian/Ubuntu：`apt install tesseract-ocr tesseract-ocr-chi-sim` |
 
-只读图文的话装不装 ffmpeg 无所谓。skill 自己会在开工前探测并报缺什么。
+只读图文、且 agent 能看图的话，`curl` + `python3` 就够了。
+skill 自己会在开工前探测并报缺什么。
 
 whisper 模型（约 1.5GB）由 skill 按需下载到 `~/.cache/whisper-models/`，
 **不入库**，也不会重复下载。

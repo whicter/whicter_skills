@@ -5,55 +5,84 @@ description: 读取小红书（xiaohongshu / xhslink.cn）笔记的完整内容�
 
 # 读小红书笔记（图文 + 视频）
 
-**核心事实：小红书正文在登录墙后面，但内容拿得到——不需要登录。**
+**核心事实：小红书正文在登录墙后面，但内容拿得到——不需要登录，也不需要浏览器。**
 
-WebFetch 拿不到（内容是 JS 渲染的），`get_page_text` 只能拿到标题和评论。
-**真正的内容在页面的 `__INITIAL_STATE__` 里**：图文笔记的每页图片 URL、
-视频笔记的 desc 和视频流地址，全都在那个 script 标签中。
+`__INITIAL_STATE__` 是**服务端直接渲染在 HTML 里**的，一条 `curl` 就能拿到：
+图文笔记的每页图片 URL、视频笔记的 desc 和视频流地址，全在那个 script 标签中。
+`get_page_text`/WebFetch 只能拿到标题和评论，看不到正文——**但那不代表要开浏览器**。
 
-> 不要因为第一次 WebFetch 失败就回复"拿不到"。本文档里的每一步都实测有效。
+> **本文档 2026-08-16 版写着"内容是 JS 渲染的，必须有真浏览器执行 JS"，那是错的。**
+> 08-17 实测：`curl` 拿到 875KB HTML，`__INITIAL_STATE__`、`imageList`、
+> `urlDefault` 全在里面，抽出来的 7 个图片 URL 与浏览器路径**完全一致**。
+> 这个错误前提曾让整份 skill 绑死在 Claude Code 上。
+>
 > 绝不登录用户的小红书账号——不需要，也不允许。
 
 ## 前置条件
 
 | 要读的东西 | 需要 | 缺了会怎样 |
 |---|---|---|
-| **任何笔记**（第一、二步） | Claude Code 的 Browser 工具（`mcp__Claude_Browser__*`）+ `curl` | 没有浏览器就**整个做不了**：正文是 JS 渲染的，`curl`/WebFetch 拿不到 |
-| **图文笔记**（第三步） | 无额外依赖 | — |
+| **任何笔记**（第一、二步） | `curl` + `python3` | — |
+| **图文笔记**（第三步） | 能看图（Read 之类的多模态读图能力） | 只能拿到 `desc`。**无法读图的 agent 见 AGENTS.md 的 OCR 路径** |
 | **视频笔记**（第四步） | `ffmpeg`、`ffprobe`、`whisper-cli` | 4A/4B 全挂。装：`brew install ffmpeg whisper-cpp`（macOS）/ 见 README |
 
 **开工前先探一次**，别做到一半才发现缺工具：
 
 ```bash
-for c in curl ffmpeg ffprobe whisper-cli; do printf '%-12s %s\n' "$c" "$(command -v $c || echo '缺')"; done
+for c in curl python3 ffmpeg ffprobe whisper-cli; do printf '%-12s %s\n' "$c" "$(command -v $c || echo '缺')"; done
 ```
 
 视频笔记而 `ffmpeg`/`whisper-cli` 缺失时：**直说缺什么、给出安装命令**，
 不要退回去只读 `desc` 然后当成读过了——那正是本文档反复警告的事。
 
-## 第一步：打开页面
+## 第一、二步：抓页面 + 提取（一条 curl + 一段 python）
 
-```
-mcp__Claude_Browser__preview_start  {url: "<短链或完整链接>"}
-```
-
-**然后直接跳第二步跑 JS**——内容本来就在 DOM 里，登录弹窗只是遮住画面，
-不挡 JS 读取。2026-08-16 实测：一次 `preview_start` + 一次 JS 就拿全了 7 页，
-截图和点 ✕ 都没做。**别默认要关弹窗，那是白花两轮往返。**
-
-只有第二步返回 `{err: 'state 未加载'}` 且等 2 秒重试仍失败时，才截图关弹窗：
-登录弹窗右上角有个 ✕。**坐标陷阱**：截图返回的坐标空间是 **800×450**，
-但你看到的图像按 1600×900 渲染——**点击坐标要把目测值除以 2**。
-✕ 通常在目测 (1249, 200) 处 ⇒ 传 `coordinate: [625, 100]`。
-
-```
-mcp__Claude_Browser__computer  {action: "left_click", coordinate: [625, 100]}
+```bash
+D=<scratchpad>/xhs && rm -rf "$D" && mkdir -p "$D" && cd "$D"
+curl -sS -o raw.html '<完整分享链接>'
 ```
 
-## 第二步：从 __INITIAL_STATE__ 提取
+```bash
+python3 - <<'PY'
+import re, json
+h = open('raw.html', encoding='utf-8', errors='replace').read()
+t = h.replace('\\u002F', '/')
+urls  = list(dict.fromkeys(re.findall(r'"urlDefault":"(http[^"]+)"', t)))
+desc  = (re.search(r'"desc":"(.{0,4000}?)"', t) or [None, None])[1]
+vid   = re.search(r'"masterUrl":"(http[^"]+\.mp4[^"]*)"', t)
+dur   = re.search(r'"duration":(\d+)', t)
+title = (re.search(r'<title[^>]*>(.*?)</title>', h, re.S) or [None, ''])[1].strip()
+out = {"title": title, "isVideo": bool(vid), "imageCount": len(urls),
+       "durationSec": int(dur.group(1))/1000 if dur else None,
+       "desc": desc, "videoUrl": vid.group(1) if vid else None}
+print(json.dumps(out, ensure_ascii=False, indent=2))
+open('urls.txt', 'w').write('\n'.join(urls) + '\n')   # 结尾换行不能省，见下
+PY
+```
+
+> **`+ '\n'` 是有代价的教训**：不带结尾换行时，下一步的
+> `while read -r u` 会**静默丢掉最后一张图**（实测 `imageCount: 7` 只下来 6 张，
+> 不报任何错）。图文笔记的结论常在最后一页，丢了不会有人发现。
+> 下载后**必须拿文件数和 `imageCount` 对一遍**。
+
+- `desc` = 作者自己写的正文/摘要，**任何笔记都要读它**
+- `isVideo` 为 false ⇒ 图文笔记，走第三步
+- `isVideo` 为 true ⇒ 视频笔记，走第四步
+
+**必须用完整的分享链接**，`xsec_token` 那一段是**必需的**：只留笔记 id
+（`/explore/<id>`）会拿到 302 而不是内容（实测）。`User-Agent` 反而不需要，
+默认的 `curl/x.y` 就能拿到 200。连打 5 次未见限流。
+
+如果 `imageCount` 为 0 且 `isVideo` 为 false，多半是链接缺 token 或已失效——
+**先回头看 `raw.html` 的 HTTP 状态和大小**（正常约 800KB+），别急着换方案。
+
+### 兜底：浏览器路径（仅 Claude Code）
+
+上面那条 `curl` 失败时（小红书改了渲染方式、或加了反爬），可以退回浏览器：
 
 ```
-mcp__Claude_Browser__javascript_tool  {action: "javascript_exec", text: "<下面这段>"}
+mcp__Claude_Browser__preview_start  {url: "<链接>"}
+mcp__Claude_Browser__javascript_tool {action: "javascript_exec", text: "<下面这段>"}
 ```
 
 ```js
@@ -71,9 +100,9 @@ mcp__Claude_Browser__javascript_tool  {action: "javascript_exec", text: "<下面
 })()
 ```
 
-- `desc` = 作者自己写的正文/摘要，**任何笔记都要读它**
-- `isVideo` 为 false ⇒ 图文笔记，走第三步
-- `isVideo` 为 true ⇒ 视频笔记，走第四步
+登录弹窗**不用管**——内容在 DOM 里，弹窗只遮画面不挡 JS。真要关它：截图返回的
+坐标空间是 **800×450** 而图像按 1600×900 渲染，**目测坐标要除以 2**；
+✕ 通常在目测 (1249, 200) ⇒ 传 `coordinate: [625, 100]`。
 
 **⚠️ `desc` 是作者对自己内容的转述，不等于内容本身。**
 实测遇到过 desc 把视频里的 k=1 单阶信号写成"跌久必涨"多根连跌、
@@ -86,17 +115,27 @@ mcp__Claude_Browser__javascript_tool  {action: "javascript_exec", text: "<下面
 这一步只要 `curl`，没有任何其它依赖。
 
 ```bash
-D=<scratchpad>/xhs && rm -rf "$D" && mkdir -p "$D" && cd "$D"
-i=1; while read -r u; do curl -sS -o "$(printf 'p%02d.webp' $i)" "$u"; i=$((i+1)); done < urls.txt
-ls -la p*.webp     # 逐个确认非空——签名过期时 curl 会静默产出 0 字节文件
+i=1; while read -r u || [ -n "$u" ]; do
+  curl -sS -o "$(printf 'p%02d.webp' $i)" "$u"; i=$((i+1))
+done < urls.txt
+
+# 必查两项：张数对不对、有没有 0 字节（签名过期时 curl 会静默产出空文件）
+echo "下到 $(ls p*.webp | wc -l | tr -d ' ') 张，应为 imageCount"
+find . -name 'p*.webp' -size 0 -print
 ```
+
+`|| [ -n "$u" ]` 是给没有结尾换行的 `urls.txt` 兜底的第二道保险——
+两道都留着，因为丢的那张不会报错。
 
 > **本文档 2026-08-16 版曾写「Read 读不了 webp，必须先转 PNG」，那是错的**
 > （或者早已过期）。多出来的 `sips` 转换步骤既浪费一轮命令，又是这份 skill
 > 当时唯一的 macOS 专有依赖，白白挡住了 Linux 用户。
-> 万一将来遇到 Read 读不了的 webp 变体（例如动图），再按需转：
-> `sips -s format png in.webp --out out.png`（macOS）/ `dwebp in.webp -o out.png`
-> / `ffmpeg -i in.webp out.png` —— **三条都实测可解码**，按 `command -v` 探测取其一。
+>
+> **`.webp` 这个后缀还是假的**：URL 以 `webp_3` 结尾，但 CDN 实际返回什么格式
+> 看它心情——实测同一篇笔记里 p01 是真 webp、**p02 是 JPEG**。要判格式用
+> `file`，别信扩展名。这也是为什么 `dwebp` 会对着某些图报 `BITSTREAM_ERROR`：
+> 那根本不是 webp。真需要转格式时用 **`sips`（macOS）或 `ffmpeg`（跨平台）**，
+> 两者对真 webp 和 JPEG 都实测可解；**`dwebp` 只吃真 webp，不要用作通用兜底**。
 
 > zsh 坑：目录里没有 `.webp` 时 `rm -f p*.webp` 会报 `no matches found` 并
 > **中止那一行**——这是 **shell 自己报的**，`2>/dev/null` 和 `|| true` 都挡不住。
