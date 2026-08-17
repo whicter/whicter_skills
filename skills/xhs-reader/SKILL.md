@@ -53,7 +53,7 @@ vid   = re.search(r'"masterUrl":"(http[^"]+\.mp4[^"]*)"', t)
 dur   = re.search(r'"duration":(\d+)', t)
 title = (re.search(r'<title[^>]*>(.*?)</title>', h, re.S) or [None, ''])[1].strip()
 out = {"title": title, "isVideo": bool(vid), "imageCount": len(urls),
-       "durationSec": int(dur.group(1))/1000 if dur else None,
+       "durationSec": int(dur.group(1)) if dur else None,     # 单位是**秒**，见下
        "desc": desc, "videoUrl": vid.group(1) if vid else None}
 print(json.dumps(out, ensure_ascii=False, indent=2))
 open('urls.txt', 'w').write('\n'.join(urls) + '\n')   # 结尾换行不能省，见下
@@ -64,6 +64,17 @@ PY
 > `while read -r u` 会**静默丢掉最后一张图**（实测 `imageCount: 7` 只下来 6 张，
 > 不报任何错）。图文笔记的结论常在最后一页，丢了不会有人发现。
 > 下载后**必须拿文件数和 `imageCount` 对一遍**。
+
+> **`duration` 的单位是秒，不是毫秒**（2026-08-17 实测更正）。本文档此前写
+> `int(dur)/1000`，于是一条 2 分 50 秒的视频被报成 `durationSec: 0.17`——
+> 那个数字小得**像是抓错了字段**，很容易让人回头怀疑链接或正则，白跑一轮。
+> 实测：JSON 里 `"duration":170`，`ffprobe` 给 169.58 秒。
+>
+> 这个字段只用来**估个数量级**（选抽帧间隔）。真要精确时长，**以 `ffprobe`
+> 为准**——它读的是视频本身，不是页面上的元数据：
+> ```bash
+> ffprobe -v error -show_entries format=duration -of csv=p=0 "<videoUrl>"
+> ```
 
 - `desc` = 作者自己写的正文/摘要，**任何笔记都要读它**
 - `isVideo` 为 false ⇒ 图文笔记，走第三步
@@ -96,7 +107,7 @@ mcp__Claude_Browser__javascript_tool {action: "javascript_exec", text: "<下面�
   const vid  = (t.match(/"masterUrl":"(http:[^"]+\.mp4[^"]*)"/) || [])[1] || null;
   const dur  = (t.match(/"duration":(\d+)/) || [])[1] || null;
   return {title: document.title, isVideo: !!vid, imageCount: urls.length,
-          durationSec: dur ? +dur/1000 : null, desc, urls, videoUrl: vid};
+          durationSec: dur ? +dur : null, desc, urls, videoUrl: vid};  // 秒，不是毫秒
 })()
 ```
 
@@ -152,11 +163,26 @@ find . -name 'p*.webp' -size 0 -print
 大量信息只在画面上：图表、数字、代码、参数表、"重点"贴纸。
 只听音轨会漏掉全部数字，而数字恰恰是最要紧的部分。
 
-先确认 URL 可达（视频 URL 带签名，几小时后过期，过期回第二步重取）：
+先确认 URL 可达并拿到真实时长（视频 URL 带签名，几小时后过期，过期回第二步重取）：
 
 ```bash
-curl -sI "<videoUrl>" | head -3
+ffprobe -v error -show_entries format=duration,size \
+        -show_entries stream=codec_type,width,height -of default=nw=1 "<videoUrl>"
 ```
+
+> **别用 `curl -sI`（HEAD）单独判可达**（2026-08-17 实测更正）。
+> 实际观测到的是：同一个视频 URL，`curl -sI` **先返回 404、二十分钟后又返回
+> 200**，而这期间 `ffprobe` 一直读得好好的（169.58 秒、720×1560、33 MB）。
+>
+> **我不知道那次 404 的成因**（CDN 边缘节点差异？瞬时抖动？）——一次观测
+> 撑不起一个机制解释，所以这里只写现象：**HEAD 的结果不可靠，而它失败时
+> 视频其实是好的**。照旧文档做会把一个完全可用的链接误判成"已失效"，
+> 回头重取——而重取拿到的还是同一个 URL，于是陷入"怎么取都是坏的"的错觉。
+>
+> 用 `ffprobe` 的理由不只是更准，而是**一条命令同时给三样东西**：可达性
+> （能读出来就是通的）、真实时长（用来算抽帧间隔）、分辨率。
+> 非要用 curl，也该用范围 GET 而不是 HEAD：
+> `curl -sr 0-0 -o /dev/null -w '%{http_code}\n' "<url>"`（实测回 206）。
 
 ### 4A 音轨 → 带时间轴的转写
 
@@ -177,11 +203,8 @@ whisper-cli -m "$MODEL" -f v.wav -l auto -osrt -otxt -of transcript -pp
 
 ### 4B 关键帧 → 逐帧读画面
 
-**先量体裁衣**：`ffprobe` 拿时长，按内容形态选抽帧策略。
-
-```bash
-ffprobe -v error -show_entries format=duration -of csv=p=0 "<videoUrl>"
-```
+**先量体裁衣**：用第四步开头 `ffprobe` 拿到的时长，按内容形态选抽帧策略
+（别再跑一遍——那条命令已经同时给了可达性、时长和分辨率）。
 
 **下面两条命令 2026-08-16 实测通过**（合成测试片：4 个纯色段各 3 秒）。
 草稿里想当然写的版本两条都是坏的，坑写在后面。
