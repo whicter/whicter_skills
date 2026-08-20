@@ -3,6 +3,46 @@
 Claude Code 的**跨项目通用 skill**。放在这里的东西对所有项目可见，
 且和任何单个项目的代码无关。
 
+## `xhs-reader` 做什么
+
+**给它一个小红书链接，它把里面的内容全部变成文字。**
+
+小红书的正文不是文本——图文帖的正文印在图片里，视频帖的正文是人在说话。
+两种都读不了 Ctrl-F。这个 skill 做的就是把它们**统一还原成可读、可搜、可引用的文字**。
+
+| 笔记类型 | 怎么读 | 你拿到什么 |
+|---|---|---|
+| **图文帖** | 按页下载图片，逐页读 | 每页正文（数字照抄原样）+ 作者写的 desc |
+| **视频帖** | ① 抽音轨 → 语音转文字<br>② 抽关键帧 → 逐帧读画面 | **带时间轴的完整 script** + 逐帧画面摘要，两者对账后合并 |
+
+视频为什么要两条腿一起走：口播视频里的图表、数字、参数表**只存在于画面上**，
+只做语音转写会把数字全部漏掉——而数字往往正是你要的那部分。
+
+它还有一条**汇报纪律**：数字必须精确、区分"作者主张"和"已验证事实"、
+笔记内部前后不一致的地方要点名。这类内容常被拿去做决策，照抄结论
+等于把作者的错误一起搬进来。
+
+不登录任何账号，也不需要——内容本来就拿得到。
+
+## 用到的库
+
+| 环节 | 用什么 | 撰写时实测版本 |
+|---|---|---|
+| 抓页面、解析 | `curl` + `python3`（标准库正则，无第三方包） | 系统自带 |
+| **视频解码 / 抽音轨 / 抽帧** | **FFmpeg**（`ffmpeg` + `ffprobe`） | 8.1.1 |
+| **语音转文字** | **whisper.cpp**（`whisper-cli`），模型 `ggml-large-v3-turbo`（约 1.5 GB） | whisper-cpp 1.8.4 |
+| 画面转文字（仅不能直接看图的 agent） | **Tesseract OCR** + `chi_sim` 中文包 | tesseract 5.5.2 |
+
+几点说明：
+
+- **没有 Python 第三方依赖**，不需要 venv、不需要 pip install。解析就是标准库 `re`。
+- **FFmpeg 只做解复用和转码**，不重编码视频：抽音轨是 `-vn -ac 1 -ar 16000`
+  （whisper 要求 16 kHz 单声道 PCM），抽帧是 `fps=1/N` 直接出 JPEG。所以很快。
+- **whisper.cpp 是本地推理，不调任何云 API**，音频不出本机。模型按需下载到
+  `~/.cache/whisper-models/`，只下一次。
+- **Tesseract 只有 Codex 这类"不能自己打开磁盘图片"的 agent 才需要**。
+  Claude Code 直接读图，不经过 OCR。
+
 ## 为什么单独一个 repo
 
 第一个 skill（`xhs-reader`）原本写在 `quantrift_index_future/.claude/skills/` 下，
@@ -31,6 +71,17 @@ git clone <this repo> ~/Documents/claude_skills
 真实目录，它会拒绝覆盖并提示你先自行处理，不会静默删掉任何文件。
 
 ### 方式二：plugin marketplace（给别人用）
+
+> **marketplace 是什么**：Claude Code 装扩展（plugin）的官方渠道。它**不是应用商店，
+> 也不是任何在线服务**——就是一个 git 仓库，根目录放一个
+> `.claude-plugin/marketplace.json` 当目录清单，列出"我这儿有哪些 plugin、各自在哪"。
+> 别人 `add` 你的仓库地址，Claude Code 读那份清单，就知道能装什么。
+> 没有审核、没有上架、不用注册，**推到 GitHub 就算发布了**。
+>
+> 三个名字别混：**marketplace**（仓库/货架，本仓库叫 `whicter-skills`）→
+> 里面的 **plugin**（一个可安装单元，这里叫 `xhs-reader`）→ plugin 里的
+> **skill**（真正干活的 `SKILL.md`，这里也叫 `xhs-reader`）。
+> 所以安装命令读作「从 `whicter-skills` 这个货架上装 `xhs-reader`」。
 
 不用 clone，在 Claude Code 里两条命令：
 
@@ -132,7 +183,7 @@ README 清单、`skills/` 下的实际目录、以及每个 `SKILL.md` 的 `name
 
 | 名字 | 用途 |
 |---|---|
-| `xhs-reader` | 读小红书笔记全文：图文逐页、视频整片转写。绕过登录墙（不登录账号） |
+| `xhs-reader` | **把小红书笔记全部转成文字**：图文帖逐页读图，视频帖做语音转写 + 关键帧读画面，合成带时间轴的完整 script。不登录账号 |
 
 ## 约定
 
