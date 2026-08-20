@@ -1,4 +1,4 @@
-# claude_skills
+# whicter_skills
 
 Claude Code 的**跨项目通用 skill**。放在这里的东西对所有项目可见，
 且和任何单个项目的代码无关。
@@ -59,8 +59,8 @@ Claude Code 的**跨项目通用 skill**。放在这里的东西对所有项目�
 ### 方式一：symlink（维护者自己 / 新机器）
 
 ```bash
-git clone <this repo> ~/Documents/claude_skills
-~/Documents/claude_skills/install.sh
+git clone git@github.com:whicter/whicter_skills.git ~/Documents/whicter_skills
+~/Documents/whicter_skills/install.sh
 ```
 
 `install.sh` 把 `~/.claude/skills` 指向本仓库的 `skills/`。之后**所有项目**
@@ -86,7 +86,7 @@ git clone <this repo> ~/Documents/claude_skills
 不用 clone，在 Claude Code 里两条命令：
 
 ```
-/plugin marketplace add whicter/claude_skills
+/plugin marketplace add whicter/whicter_skills
 ```
 
 ```
@@ -138,7 +138,7 @@ whisper 模型（约 1.5GB）由 skill 按需下载到 `~/.cache/whisper-models/
 ## 目录结构
 
 ```
-claude_skills/
+whicter_skills/
 ├── README.md
 ├── LICENSE
 ├── install.sh

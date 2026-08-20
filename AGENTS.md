@@ -74,9 +74,9 @@ done
 Codex 只在**工作目录**（及其父目录）和 `~/.codex/AGENTS.md` 找这个文件。
 
 ```bash
-git clone <this repo> ~/claude_skills
+git clone https://github.com/whicter/whicter_skills.git ~/whicter_skills
 # 全局生效（会覆盖已有的 ~/.codex/AGENTS.md，先看一眼）
-cat ~/claude_skills/AGENTS.md >> ~/.codex/AGENTS.md
+cat ~/whicter_skills/AGENTS.md >> ~/.codex/AGENTS.md
 ```
 
 注意本文件用相对路径引用 `skills/xhs-reader/SKILL.md`。放到 `~/.codex/` 之后
