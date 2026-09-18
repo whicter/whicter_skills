@@ -2,7 +2,7 @@
   "name": "whicter-skills",
   "description": "跨项目通用的 Claude Code skill",
   "owner": {
-    "name": "whicter",
+    "name": "Viktor Han",
     "url": "https://github.com/whicter"
   },
   "plugins": [
